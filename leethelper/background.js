@@ -1,46 +1,56 @@
-async function callOpenAI(prompt, mode) {
-  const { apiKey } = await chrome.storage.local.get("apiKey");
-  console.log(apiKey); // secure storage[22]
-  const SYSTEM = `You are a coding tutor who can provide a ${mode}.`;
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+async function callGemini(prompt) {
+
+  const geminiKey  = await chrome.storage.local.get("apiKey"); // store from options.html
+  const key = geminiKey?.apiKey || geminiKey; // handle both old and new storage formats
+
+  if (!key) throw new Error('Missing Gemini API key');
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  const res = await fetch(`${url}?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: mode === "SOLUTION" ? 800 : 300,
-      temperature: 0.2,
-    }),
+      contents: [
+        { role: 'user', parts: [{ text: prompt }] }
+      ]
+    })
   });
-  const data = await res.json(); // promise-based Fetch[20]
-  return data.choices?.message.content.trim();
+
+  if (!res.ok) {
+    const errText = await res.text().catch(()=>'');
+    throw new Error(`Gemini error ${res.status}: ${errText}`);
+  }
+
+  const data = await res.json();
+  // Extract text from candidates
+  const ans  = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return ans.trim() || "No answer received from Gemini.";
 }
 
+
 chrome.runtime.onMessage.addListener(async (msg, sender, send) => {
-  if (msg.type === "ASK_OPENAI") {
+  if (msg.type === "ASK_AI") {
     const [tab] = await chrome.tabs.query({
       active: true,
       currentWindow: true,
     });
-    const problem = await chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }); // content-script[23]
+    // const problem = await chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }); // content-script[23]
+    // const problem = await new Promise((resolve) => {
+    //   chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }, resolve);
+    // });
+    const problem = "why we use hello world as first program"; // for testing
     console.log("problem:", problem);
     if (problem.error) {
       send({ answer: problem.error });
       return true; // keep port open for async reply[23]
     }
-    const answer = await callOpenAI(problem.body, msg.mode);
+    //const answer = await callOpenAI(problem.body, msg.mode);
+    const answer = await callGemini(problem); // mode can be "SOLUTION" or "EXPLANATION"
     console.log("answer:", answer);
     if (!answer) {
       send({ answer: "No answer received from OpenAI." });
       return true; // keep port open for async reply[23]
     }
-    send({ answer });
+    send(answer);
     return true; // keep port open for async reply[23]
   }
 });
