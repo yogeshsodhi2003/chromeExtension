@@ -1,31 +1,31 @@
 async function callGemini(prompt) {
-
-  const geminiKey  = await chrome.storage.local.get("apiKey"); // store from options.html
+  const geminiKey = await chrome.storage.local.get("apiKey"); // store from options.html
   const key = geminiKey?.apiKey || geminiKey; // handle both old and new storage formats
 
-  if (!key) throw new Error('Missing Gemini API key');
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  if (!key) throw new Error("Missing Gemini API key");
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
   const res = await fetch(`${url}?key=${key}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [
-        { role: 'user', parts: [{ text: prompt }] }
-      ]
-    })
+        { role: "user", parts: [{ 
+          text: `You are an expert in LeetCode problems. give the solution based on python language of the question based on the problem number and title: ${prompt}` }]  },
+      ],
+    }),
   });
 
   if (!res.ok) {
-    const errText = await res.text().catch(()=>'');
+    const errText = await res.text().catch(() => "");
     throw new Error(`Gemini error ${res.status}: ${errText}`);
   }
 
   const data = await res.json();
   // Extract text from candidates
-  const ans  = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const ans = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return ans.trim() || "No answer received from Gemini.";
 }
-
 
 chrome.runtime.onMessage.addListener(async (msg, sender, send) => {
   if (msg.type === "ASK_AI") {
@@ -33,11 +33,22 @@ chrome.runtime.onMessage.addListener(async (msg, sender, send) => {
       active: true,
       currentWindow: true,
     });
-    // const problem = await chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }); // content-script[23]
-    // const problem = await new Promise((resolve) => {
-    //   chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }, resolve);
-    // });
-    const problem = "why we use hello world as first program"; // for testing
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content.js"],
+    });
+
+    const problem = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }, (response) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          reject(new Error(err.message)); // Handle "connection doesn't build" errors
+        } else {
+          resolve(response);
+        }
+      });
+    });
+
     console.log("problem:", problem);
     if (problem.error) {
       send({ answer: problem.error });

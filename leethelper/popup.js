@@ -1,3 +1,4 @@
+console.log("LeetHelper popup loaded");
 const out = document.getElementById('out');
 
 [...document.querySelectorAll('button')].forEach((btn) => {
@@ -13,7 +14,7 @@ const out = document.getElementById('out');
       if (err) {
         showOut(`Error: ${err.message}`, true);
         setButtonsDisabled(false);
-        return;
+        return ;
       }
       if (!resp) {
         showOut('No answer received.', true);
@@ -28,6 +29,7 @@ const out = document.getElementById('out');
       const text = typeof resp === 'string' ? resp : resp.answer;
       showOut(text || 'No answer received.', false);
       setButtonsDisabled(false);
+      return true; // keep port open for async reply
     });
   };
 });
