@@ -1,4 +1,4 @@
-async function callGemini(prompt) {
+async function callGemini(prompt, mode) {
   const geminiKey = await chrome.storage.local.get("apiKey"); // store from options.html
   const key = geminiKey?.apiKey || geminiKey; // handle both old and new storage formats
 
@@ -11,7 +11,7 @@ async function callGemini(prompt) {
     body: JSON.stringify({
       contents: [
         { role: "user", parts: [{ 
-          text: `You are an expert in LeetCode problems. give the solution based on python language of the question based on the problem number and title: ${prompt}` }]  },
+          text: `You are an expert in LeetCode problems. give the ${mode} based on python language of the question based on the problem number and title: ${prompt} if given hint give hint of the solution with no code if given explantion give the short explantion of the question in short and easy to understand language with no code. if given solution give only the code in python` }]  },
       ],
     }),
   });
@@ -27,41 +27,52 @@ async function callGemini(prompt) {
   return ans.trim() || "No answer received from Gemini.";
 }
 
-chrome.runtime.onMessage.addListener(async (msg, sender, send) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "ASK_AI") {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["content.js"],
-    });
+    (async () => {
+      try {
+        // Find active tab
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    const problem = await new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }, (response) => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          reject(new Error(err.message)); // Handle "connection doesn't build" errors
-        } else {
-          resolve(response);
+        // Inject content.js (only if not already injected)
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["content.js"],
+        });
+
+        // Ask content.js for the problem
+        const problem = await new Promise((resolve, reject) => {
+          chrome.tabs.sendMessage(tab.id, { type: "SCRAPE" }, (response) => {
+            const err = chrome.runtime.lastError;
+            if (err) {
+              reject(new Error(err.message));
+            } else {
+              resolve(response);
+            }
+          });
+        });
+
+        const mode = msg.mode || "SOLUTION";
+
+        if (!problem) {
+          sendResponse({ error: "No problem data received." });
+          return; // stop execution here
         }
-      });
-    });
 
-    console.log("problem:", problem);
-    if (problem.error) {
-      send({ answer: problem.error });
-      return true; // keep port open for async reply[23]
-    }
-    //const answer = await callOpenAI(problem.body, msg.mode);
-    const answer = await callGemini(problem); // mode can be "SOLUTION" or "EXPLANATION"
-    console.log("answer:", answer);
-    if (!answer) {
-      send({ answer: "No answer received from OpenAI." });
-      return true; // keep port open for async reply[23]
-    }
-    send(answer);
-    return true; // keep port open for async reply[23]
+        // Call Gemini
+        const answer = await callGemini(problem, mode);
+
+        if (!answer) {
+          sendResponse({ error: "No answer received from Gemini." });
+        } else {
+          sendResponse({ answer });
+        }
+      } catch (err) {
+        sendResponse({ error: `Failed: ${err.message}` });
+      }
+    })();
+
+    return true; // keep port alive for async
   }
 });
+
